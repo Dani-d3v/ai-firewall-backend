@@ -19,11 +19,15 @@ app.use(helmet());
 // Routes
 const userRoutes = require("./routes/userRoutes");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
+const { errorHandler } = require("./middleware/errorMiddleware");
+const morgan = require("morgan");
 
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
+app.use(errorHandler);
+app.use(morgan("dev"));
 
 // Test Route
 app.get("/", (req, res) => {

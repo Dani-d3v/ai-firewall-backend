@@ -54,8 +54,42 @@ exports.getMyPlan = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
 
-    res.json(user.subscription);
+    // Check expiry
+    if (
+      user.subscription.endDate &&
+      new Date() > user.subscription.endDate
+    ) {
+      user.subscription.status = "inactive";
+      await user.save();
+    }
+
+    res.json({
+      success: true,
+      data: user.subscription,
+    });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ADMIN - CREATE PLAN
+exports.createPlan = async (req, res) => {
+  try {
+    const { name, price, duration, features } = req.body;
+
+    const plan = await Subscription.create({
+      name,
+      price,
+      duration,
+      features,
+    });
+
+    res.status(201).json({
+      success: true,
+      data: plan,
+      message: "Plan created",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
