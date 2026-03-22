@@ -3,6 +3,7 @@ const bcrypt = require("bcryptjs");
 const generateToken = require("../utils/generateToken");
 const asyncHandler = require("../utils/asyncHandler");
 const { sendSuccess } = require("../utils/apiResponse");
+const { isValidEmail } = require("../utils/validation");
 
 const buildAuthPayload = (user) => {
   return {
@@ -32,6 +33,18 @@ exports.registerUser = asyncHandler(async (req, res) => {
 
   if (!trimmedName || !normalizedEmail || !password) {
     const error = new Error("Name, email, and password are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!isValidEmail(normalizedEmail)) {
+    const error = new Error("Please provide a valid email address");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (password.length < 6) {
+    const error = new Error("Password must be at least 6 characters long");
     error.statusCode = 400;
     throw error;
   }
@@ -69,6 +82,12 @@ exports.loginUser = asyncHandler(async (req, res) => {
 
   if (!normalizedEmail || !password) {
     const error = new Error("Email and password are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!isValidEmail(normalizedEmail)) {
+    const error = new Error("Please provide a valid email address");
     error.statusCode = 400;
     throw error;
   }

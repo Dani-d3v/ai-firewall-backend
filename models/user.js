@@ -1,5 +1,56 @@
 const mongoose = require("mongoose");
 
+const subscriptionHistorySchema = new mongoose.Schema(
+  {
+    planId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Subscription",
+    },
+    planName: {
+      type: String,
+      required: true,
+    },
+    price: {
+      type: Number,
+      required: true,
+    },
+    duration: {
+      type: Number,
+      required: true,
+    },
+    features: [
+      {
+        type: String,
+      },
+    ],
+    status: {
+      type: String,
+      enum: ["active", "cancelled", "expired"],
+      required: true,
+    },
+    startedAt: {
+      type: Date,
+      required: true,
+    },
+    endedAt: {
+      type: Date,
+      required: true,
+    },
+    cancelledAt: Date,
+    paymentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Payment",
+    },
+    paymentMethod: String,
+    paymentStatus: String,
+    transactionId: String,
+  },
+  {
+    _id: true,
+    timestamps: true,
+  }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -25,18 +76,35 @@ const userSchema = new mongoose.Schema(
     },
 
     subscription: {
+      planId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Subscription",
+      },
       plan: {
         type: String,
         default: "free",
       },
+      price: {
+        type: Number,
+        default: 0,
+      },
       status: {
         type: String,
-        enum: ["active", "inactive"],
+        enum: ["active", "inactive", "cancelled", "expired"],
         default: "inactive",
       },
       startDate: Date,
       endDate: Date,
+      cancelledAt: Date,
+      paymentId: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Payment",
+      },
+      paymentMethod: String,
+      paymentStatus: String,
+      transactionId: String,
     },
+    subscriptionHistory: [subscriptionHistorySchema],
   },
   {
     timestamps: true,
