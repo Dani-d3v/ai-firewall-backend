@@ -1,8 +1,12 @@
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const morgan = require("morgan");
 
 const authRoutes = require("./routes/authRoutes");
+const userRoutes = require("./routes/userRoutes");
+const subscriptionRoutes = require("./routes/subscriptionRoutes");
+const { errorHandler } = require("./middleware/errorMiddleware");
 
 const app = express();
 
@@ -15,23 +19,27 @@ app.use(
   })
 );
 app.use(helmet());
-
-// Routes
-const userRoutes = require("./routes/userRoutes");
-const subscriptionRoutes = require("./routes/subscriptionRoutes");
-const { errorHandler } = require("./middleware/errorMiddleware");
-const morgan = require("morgan");
+app.use(morgan("dev"));
 
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/subscriptions", subscriptionRoutes);
-app.use(errorHandler);
-app.use(morgan("dev"));
 
 // Test Route
 app.get("/", (req, res) => {
   res.send("API is running...");
 });
+
+// Not found handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "Route not found",
+  });
+});
+
+// Global error handler
+app.use(errorHandler);
 
 module.exports = app;
