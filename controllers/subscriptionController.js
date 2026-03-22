@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const Subscription = require("../models/Subscription");
 const User = require("../models/user");
 
@@ -5,9 +6,9 @@ const User = require("../models/user");
 exports.getPlans = async (req, res) => {
   try {
     const plans = await Subscription.find();
-    res.json(plans);
+    res.json({ success: true, data: plans });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -16,10 +17,14 @@ exports.buyPlan = async (req, res) => {
   try {
     const { planId } = req.body;
 
+    if (!mongoose.isValidObjectId(planId)) {
+      return res.status(400).json({ success: false, message: "Invalid plan ID" });
+    }
+
     const plan = await Subscription.findById(planId);
 
     if (!plan) {
-      return res.status(404).json({ message: "Plan not found" });
+      return res.status(404).json({ success: false, message: "Plan not found" });
     }
 
     // Calculate dates
@@ -29,6 +34,10 @@ exports.buyPlan = async (req, res) => {
 
     // Update user subscription
     const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
 
     user.subscription = {
       plan: plan.name,
@@ -45,7 +54,7 @@ exports.buyPlan = async (req, res) => {
       message: "Subscription activated",
     });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -54,9 +63,13 @@ exports.getMyPlan = async (req, res) => {
   try {
     const user = await User.findById(req.user._id);
 
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
     // Check expiry
     if (
-      user.subscription.endDate &&
+      user.subscription?.endDate &&
       new Date() > user.subscription.endDate
     ) {
       user.subscription.status = "inactive";
