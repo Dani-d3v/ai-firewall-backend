@@ -1,7 +1,4 @@
-exports.getUserProfile = async (req, res) => {
-  try {
-    res.json(req.user);
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
-};
+const asyncHandler = require("../utils/asyncHandler");
+const { sendSuccess } = require("../utils/apiResponse");
+
+exports.getUserProfile = asyncHandler(async (req, res) => sendSuccess(res, req.user));

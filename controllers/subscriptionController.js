@@ -1,108 +1,109 @@
 const mongoose = require("mongoose");
 const Subscription = require("../models/Subscription");
 const User = require("../models/user");
+const asyncHandler = require("../utils/asyncHandler");
+const { sendSuccess } = require("../utils/apiResponse");
+
+const sanitizeFeatures = (features) => {
+  if (!Array.isArray(features)) {
+    return [];
+  }
+
+  return features
+    .filter((feature) => typeof feature === "string")
+    .map((feature) => feature.trim())
+    .filter(Boolean);
+};
 
 // GET ALL PLANS
-exports.getPlans = async (req, res) => {
-  try {
-    const plans = await Subscription.find();
-    res.json({ success: true, data: plans });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+exports.getPlans = asyncHandler(async (req, res) => {
+  const plans = await Subscription.find().sort({ price: 1, duration: 1 });
+  return sendSuccess(res, plans);
+});
 
 // BUY PLAN
-exports.buyPlan = async (req, res) => {
-  try {
-    const { planId } = req.body;
+exports.buyPlan = asyncHandler(async (req, res) => {
+  const { planId } = req.body;
 
-    if (!mongoose.isValidObjectId(planId)) {
-      return res.status(400).json({ success: false, message: "Invalid plan ID" });
-    }
-
-    const plan = await Subscription.findById(planId);
-
-    if (!plan) {
-      return res.status(404).json({ success: false, message: "Plan not found" });
-    }
-
-    // Calculate dates
-    const startDate = new Date();
-    const endDate = new Date();
-    endDate.setDate(startDate.getDate() + plan.duration);
-
-    // Update user subscription
-    const user = await User.findById(req.user._id);
-
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    user.subscription = {
-      plan: plan.name,
-      status: "active",
-      startDate,
-      endDate,
-    };
-
-    await user.save();
-
-    res.json({
-      success: true,
-      data: user.subscription,
-      message: "Subscription activated",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  if (!mongoose.isValidObjectId(planId)) {
+    const error = new Error("Invalid plan ID");
+    error.statusCode = 400;
+    throw error;
   }
-};
+
+  const plan = await Subscription.findById(planId);
+
+  if (!plan) {
+    const error = new Error("Plan not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const startDate = new Date();
+  const endDate = new Date();
+  endDate.setDate(startDate.getDate() + plan.duration);
+
+  const user = await User.findById(req.user._id);
+
+  if (!user) {
+    const error = new Error("User not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  user.subscription = {
+    plan: plan.name,
+    status: "active",
+    startDate,
+    endDate,
+  };
+
+  await user.save();
+
+  return sendSuccess(res, user.subscription, {
+    message: "Subscription activated",
+  });
+});
 
 // GET MY PLAN
-exports.getMyPlan = async (req, res) => {
-  try {
-    const user = await User.findById(req.user._id);
-
-    if (!user) {
-      return res.status(404).json({ success: false, message: "User not found" });
-    }
-
-    // Check expiry
-    if (
-      user.subscription?.endDate &&
-      new Date() > user.subscription.endDate
-    ) {
-      user.subscription.status = "inactive";
-      await user.save();
-    }
-
-    res.json({
-      success: true,
-      data: user.subscription,
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
+exports.getMyPlan = asyncHandler(async (req, res) =>
+  sendSuccess(res, req.user.subscription)
+);
 
 // ADMIN - CREATE PLAN
-exports.createPlan = async (req, res) => {
-  try {
-    const { name, price, duration, features } = req.body;
+exports.createPlan = asyncHandler(async (req, res) => {
+  const { name, price, duration, features } = req.body;
+  const normalizedName = typeof name === "string" ? name.trim() : "";
+  const normalizedPrice = Number(price);
+  const normalizedDuration = Number(duration);
 
-    const plan = await Subscription.create({
-      name,
-      price,
-      duration,
-      features,
-    });
-
-    res.status(201).json({
-      success: true,
-      data: plan,
-      message: "Plan created",
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, message: error.message });
+  if (
+    !normalizedName ||
+    !Number.isFinite(normalizedPrice) ||
+    !Number.isFinite(normalizedDuration)
+  ) {
+    const error = new Error("name, price (number), and duration (number) are required");
+    error.statusCode = 400;
+    throw error;
   }
-};
+
+  if (normalizedPrice < 0 || normalizedDuration <= 0) {
+    const error = new Error(
+      "price must be 0 or greater and duration must be greater than 0"
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const plan = await Subscription.create({
+    name: normalizedName,
+    price: normalizedPrice,
+    duration: normalizedDuration,
+    features: sanitizeFeatures(features),
+  });
+
+  return sendSuccess(res, plan, {
+    statusCode: 201,
+    message: "Plan created",
+  });
+});
