@@ -1,5 +1,6 @@
 const User = require("../models/user");
 const asyncHandler = require("../utils/asyncHandler");
+const { markExpiredSubscriptionForUser } = require("../utils/subscriptionState");
 
 const syncSubscriptionStatus = asyncHandler(async (req, res, next) => {
   if (!req.user?._id) {
@@ -16,22 +17,7 @@ const syncSubscriptionStatus = asyncHandler(async (req, res, next) => {
     throw error;
   }
 
-  if (
-    user.subscription?.status === "active" &&
-    user.subscription?.endDate &&
-    new Date() > new Date(user.subscription.endDate)
-  ) {
-    user.subscription.status = "expired";
-
-    const activeHistory = [...(user.subscriptionHistory || [])]
-      .reverse()
-      .find((entry) => entry.status === "active");
-
-    if (activeHistory) {
-      activeHistory.status = "expired";
-      activeHistory.endedAt = user.subscription.endDate;
-    }
-
+  if (markExpiredSubscriptionForUser(user)) {
     await user.save();
   }
 

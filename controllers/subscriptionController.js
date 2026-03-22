@@ -5,6 +5,7 @@ const Payment = require("../models/Payment");
 const asyncHandler = require("../utils/asyncHandler");
 const { sendSuccess } = require("../utils/apiResponse");
 const { normalizePlanInput, escapeRegex } = require("../utils/validation");
+const { markExpiredSubscriptionForUser } = require("../utils/subscriptionState");
 
 const buildError = (message, statusCode) => {
   const error = new Error(message);
@@ -14,27 +15,6 @@ const buildError = (message, statusCode) => {
 
 const generateTransactionId = () =>
   `SIM-${Date.now()}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
-
-const syncSubscriptionState = (user) => {
-  if (
-    user.subscription?.status === "active" &&
-    user.subscription?.endDate &&
-    new Date() > new Date(user.subscription.endDate)
-  ) {
-    user.subscription.status = "expired";
-
-    const activeHistory = [...(user.subscriptionHistory || [])]
-      .reverse()
-      .find((entry) => entry.status === "active");
-
-    if (activeHistory) {
-      activeHistory.status = "expired";
-      activeHistory.endedAt = user.subscription.endDate;
-    }
-  }
-
-  return user;
-};
 
 const ensureNoActiveSubscription = (user) => {
   if (user.subscription?.status === "active") {
@@ -79,7 +59,7 @@ exports.buyPlan = asyncHandler(async (req, res) => {
     throw buildError("User not found", 404);
   }
 
-  syncSubscriptionState(user);
+  markExpiredSubscriptionForUser(user);
   ensureNoActiveSubscription(user);
 
   const payment = await Payment.findOne({
@@ -151,7 +131,7 @@ exports.getSubscriptionHistory = asyncHandler(async (req, res) => {
 
 // SIMULATE PAYMENT
 exports.simulatePayment = asyncHandler(async (req, res) => {
-  const { planId, paymentMethod } = req.body;
+  const { planId, paymentMethod, simulateStatus } = req.body;
 
   if (!mongoose.isValidObjectId(planId)) {
     throw buildError("Invalid plan ID", 400);
@@ -177,19 +157,36 @@ exports.simulatePayment = asyncHandler(async (req, res) => {
     throw buildError("User not found", 404);
   }
 
-  syncSubscriptionState(user);
+  markExpiredSubscriptionForUser(user);
   ensureNoActiveSubscription(user);
   await user.save();
+
+  const normalizedSimulateStatus =
+    typeof simulateStatus === "string" ? simulateStatus.trim().toLowerCase() : "success";
+
+  if (!["success", "fail"].includes(normalizedSimulateStatus)) {
+    throw buildError("simulateStatus must be either 'success' or 'fail'", 400);
+  }
+
+  const paymentStatus =
+    normalizedSimulateStatus === "success" ? "completed" : "failed";
 
   const payment = await Payment.create({
     userId: user._id,
     planId: plan._id,
     amount: plan.price,
     paymentMethod: normalizedPaymentMethod,
-    status: "completed",
+    status: paymentStatus,
     simulated: true,
     transactionId: generateTransactionId(),
   });
+
+  if (paymentStatus === "failed") {
+    throw buildError(
+      `Simulated payment failed for transaction ${payment.transactionId}`,
+      402
+    );
+  }
 
   return sendSuccess(
     res,
@@ -223,7 +220,7 @@ exports.cancelMySubscription = asyncHandler(async (req, res) => {
     throw buildError("User not found", 404);
   }
 
-  syncSubscriptionState(user);
+  markExpiredSubscriptionForUser(user);
 
   if (user.subscription?.status !== "active") {
     throw buildError("You do not have an active subscription to cancel", 400);
