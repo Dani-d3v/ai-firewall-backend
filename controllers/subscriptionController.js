@@ -131,7 +131,7 @@ exports.getSubscriptionHistory = asyncHandler(async (req, res) => {
 
 // SIMULATE PAYMENT
 exports.simulatePayment = asyncHandler(async (req, res) => {
-  const { planId, paymentMethod, simulateStatus } = req.body;
+  const { planId, paymentMethod } = req.body;
 
   if (!mongoose.isValidObjectId(planId)) {
     throw buildError("Invalid plan ID", 400);
@@ -161,32 +161,15 @@ exports.simulatePayment = asyncHandler(async (req, res) => {
   ensureNoActiveSubscription(user);
   await user.save();
 
-  const normalizedSimulateStatus =
-    typeof simulateStatus === "string" ? simulateStatus.trim().toLowerCase() : "success";
-
-  if (!["success", "fail"].includes(normalizedSimulateStatus)) {
-    throw buildError("simulateStatus must be either 'success' or 'fail'", 400);
-  }
-
-  const paymentStatus =
-    normalizedSimulateStatus === "success" ? "completed" : "failed";
-
   const payment = await Payment.create({
     userId: user._id,
     planId: plan._id,
     amount: plan.price,
     paymentMethod: normalizedPaymentMethod,
-    status: paymentStatus,
+    status: "completed",
     simulated: true,
     transactionId: generateTransactionId(),
   });
-
-  if (paymentStatus === "failed") {
-    throw buildError(
-      `Simulated payment failed for transaction ${payment.transactionId}`,
-      402
-    );
-  }
 
   return sendSuccess(
     res,
