@@ -62,4 +62,28 @@ const sendRegistrationOtpEmail = async ({
   });
 };
 
-module.exports = { sendRegistrationOtpEmail };
+const sendPasswordResetOtpEmail = async ({
+  email,
+  name,
+  otp,
+  expiresInMinutes,
+}) => {
+  const mailTransporter = getTransporter();
+
+  await mailTransporter.sendMail({
+    from: process.env.EMAIL_FROM,
+    to: email,
+    subject: "Your password reset code",
+    text: `Hello ${name}, your password reset code is ${otp}. It expires in ${expiresInMinutes} minutes.`,
+    html: `
+      <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #111827;">
+        <p>Hello ${name},</p>
+        <p>Use this verification code to reset your password:</p>
+        <p style="font-size: 28px; font-weight: 700; letter-spacing: 6px;">${otp}</p>
+        <p>This code expires in ${expiresInMinutes} minutes.</p>
+      </div>
+    `,
+  });
+};
+
+module.exports = { sendRegistrationOtpEmail, sendPasswordResetOtpEmail };
