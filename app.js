@@ -39,10 +39,8 @@ app.get("/", (req, res) => {
   });
 });
 
-// Not found handler
+// Not found + global error handlers
 app.use(notFound);
-
-// Global error handler
 app.use(errorHandler);
 
 module.exports = app;

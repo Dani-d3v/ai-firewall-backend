@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+
 const Subscription = require("../models/Subscription");
 const User = require("../models/user");
 const Payment = require("../models/Payment");
@@ -25,13 +26,11 @@ const ensureNoActiveSubscription = (user) => {
   }
 };
 
-// GET ALL PLANS
 exports.getPlans = asyncHandler(async (req, res) => {
   const plans = await Subscription.find().sort({ price: 1, duration: 1 });
   return sendSuccess(res, plans);
 });
 
-// BUY PLAN
 exports.buyPlan = asyncHandler(async (req, res) => {
   const { planId, paymentId } = req.body;
 
@@ -40,20 +39,20 @@ exports.buyPlan = asyncHandler(async (req, res) => {
   }
 
   if (!mongoose.isValidObjectId(paymentId)) {
-    throw buildError("A valid paymentId is required. Complete simulated payment first.", 400);
+    throw buildError(
+      "A valid paymentId is required. Complete simulated payment first.",
+      400
+    );
   }
 
-  const plan = await Subscription.findById(planId);
+  const [plan, user] = await Promise.all([
+    Subscription.findById(planId),
+    User.findById(req.user._id),
+  ]);
 
   if (!plan) {
     throw buildError("Plan not found", 404);
   }
-
-  const startDate = new Date();
-  const endDate = new Date();
-  endDate.setDate(startDate.getDate() + plan.duration);
-
-  const user = await User.findById(req.user._id);
 
   if (!user) {
     throw buildError("User not found", 404);
@@ -73,6 +72,10 @@ exports.buyPlan = asyncHandler(async (req, res) => {
   if (!payment) {
     throw buildError("Simulated payment not found or already used for this plan", 400);
   }
+
+  const startDate = new Date();
+  const endDate = new Date();
+  endDate.setDate(startDate.getDate() + plan.duration);
 
   const historyEntry = {
     planId: plan._id,
@@ -105,20 +108,18 @@ exports.buyPlan = asyncHandler(async (req, res) => {
   user.subscriptionHistory.push(historyEntry);
 
   payment.status = "used";
-  await payment.save();
-  await user.save();
+
+  await Promise.all([payment.save(), user.save()]);
 
   return sendSuccess(res, user.subscription, {
     message: "Subscription activated",
   });
 });
 
-// GET MY PLAN
 exports.getMyPlan = asyncHandler(async (req, res) =>
   sendSuccess(res, req.user.subscription)
 );
 
-// GET SUBSCRIPTION HISTORY
 exports.getSubscriptionHistory = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id).select("subscriptionHistory");
 
@@ -129,7 +130,6 @@ exports.getSubscriptionHistory = asyncHandler(async (req, res) => {
   return sendSuccess(res, [...user.subscriptionHistory].reverse());
 });
 
-// SIMULATE PAYMENT
 exports.simulatePayment = asyncHandler(async (req, res) => {
   const { planId, paymentMethod } = req.body;
 
@@ -195,7 +195,6 @@ exports.simulatePayment = asyncHandler(async (req, res) => {
   );
 });
 
-// CANCEL MY SUBSCRIPTION
 exports.cancelMySubscription = asyncHandler(async (req, res) => {
   const user = await User.findById(req.user._id);
 
@@ -231,10 +230,13 @@ exports.cancelMySubscription = asyncHandler(async (req, res) => {
   });
 });
 
-// ADMIN - CREATE PLAN
 exports.createPlan = asyncHandler(async (req, res) => {
-  const { normalizedName, normalizedPrice, normalizedDuration, normalizedFeatures } =
-    normalizePlanInput(req.body);
+  const {
+    normalizedName,
+    normalizedPrice,
+    normalizedDuration,
+    normalizedFeatures,
+  } = normalizePlanInput(req.body);
 
   if (
     !normalizedName ||
@@ -272,7 +274,6 @@ exports.createPlan = asyncHandler(async (req, res) => {
   });
 });
 
-// ADMIN - UPDATE PLAN
 exports.updatePlan = asyncHandler(async (req, res) => {
   const { planId } = req.params;
 
@@ -280,8 +281,12 @@ exports.updatePlan = asyncHandler(async (req, res) => {
     throw buildError("Invalid plan ID", 400);
   }
 
-  const { normalizedName, normalizedPrice, normalizedDuration, normalizedFeatures } =
-    normalizePlanInput(req.body);
+  const {
+    normalizedName,
+    normalizedPrice,
+    normalizedDuration,
+    normalizedFeatures,
+  } = normalizePlanInput(req.body);
 
   if (
     !normalizedName ||
@@ -325,7 +330,6 @@ exports.updatePlan = asyncHandler(async (req, res) => {
   return sendSuccess(res, plan, { message: "Plan updated" });
 });
 
-// ADMIN - DELETE PLAN
 exports.deletePlan = asyncHandler(async (req, res) => {
   const { planId } = req.params;
 
@@ -339,10 +343,14 @@ exports.deletePlan = asyncHandler(async (req, res) => {
     throw buildError("Plan not found", 404);
   }
 
-  return sendSuccess(res, {
-    _id: plan._id,
-    name: plan.name,
-  }, {
-    message: "Plan deleted",
-  });
+  return sendSuccess(
+    res,
+    {
+      _id: plan._id,
+      name: plan.name,
+    },
+    {
+      message: "Plan deleted",
+    }
+  );
 });

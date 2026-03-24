@@ -1,5 +1,4 @@
 const express = require("express");
-const router = express.Router();
 
 const {
   getPlans,
@@ -12,15 +11,14 @@ const {
   updatePlan,
   deletePlan,
 } = require("../controllers/subscriptionController");
-
 const { protect } = require("../middleware/authMiddleware");
 const { admin } = require("../middleware/adminMiddleware");
 const { syncSubscriptionStatus } = require("../middleware/subscriptionMiddleware");
 
-// Public route
+const router = express.Router();
+
 router.get("/", getPlans);
 
-// Protected routes
 router.post("/simulate-payment", protect, syncSubscriptionStatus, simulatePayment);
 router.post("/buy", protect, syncSubscriptionStatus, buyPlan);
 router.patch("/cancel", protect, syncSubscriptionStatus, cancelMySubscription);

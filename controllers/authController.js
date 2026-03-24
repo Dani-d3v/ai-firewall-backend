@@ -1,21 +1,29 @@
-const User = require("../models/user");
 const bcrypt = require("bcryptjs");
+const crypto = require("crypto");
+
+const User = require("../models/user");
+const PendingRegistration = require("../models/pendingRegistration");
 const generateToken = require("../utils/generateToken");
 const asyncHandler = require("../utils/asyncHandler");
 const { sendSuccess } = require("../utils/apiResponse");
 const { isValidEmail } = require("../utils/validation");
+const { sendRegistrationOtpEmail } = require("../services/emailService");
 
-const buildAuthPayload = (user) => {
-  return {
-    _id: user._id,
-    name: user.name,
-    email: user.email,
-    token: generateToken(user._id),
-  };
-};
+const OTP_EXPIRY_MINUTES = 10;
 
-// REGISTER
-exports.registerUser = asyncHandler(async (req, res) => {
+const buildAuthPayload = (user) => ({
+  _id: user._id,
+  name: user.name,
+  email: user.email,
+  token: generateToken(user._id),
+});
+
+const hashOtp = (otp) =>
+  crypto.createHash("sha256").update(String(otp)).digest("hex");
+
+const generateOtp = () => String(Math.floor(100000 + Math.random() * 900000));
+
+exports.requestRegistrationOtp = asyncHandler(async (req, res) => {
   const { name, email, password } = req.body;
 
   if (
@@ -49,26 +57,139 @@ exports.registerUser = asyncHandler(async (req, res) => {
     throw error;
   }
 
-  const userExists = await User.findOne({ email: normalizedEmail });
-  if (userExists) {
+  const existingUser = await User.findOne({ email: normalizedEmail });
+  if (existingUser) {
     const error = new Error("User already exists");
     error.statusCode = 400;
     throw error;
   }
 
-  const salt = await bcrypt.genSalt(10);
-  const hashedPassword = await bcrypt.hash(password, salt);
+  const otp = generateOtp();
+  const otpHash = hashOtp(otp);
+  const passwordHash = await bcrypt.hash(password, 10);
+  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
+
+  await PendingRegistration.findOneAndUpdate(
+    { email: normalizedEmail },
+    {
+      name: trimmedName,
+      email: normalizedEmail,
+      password: passwordHash,
+      otpHash,
+      expiresAt,
+      otpAttempts: 0,
+    },
+    {
+      new: true,
+      upsert: true,
+      setDefaultsOnInsert: true,
+    }
+  );
+
+  await sendRegistrationOtpEmail({
+    email: normalizedEmail,
+    name: trimmedName,
+    otp,
+    expiresInMinutes: OTP_EXPIRY_MINUTES,
+  });
+
+  return sendSuccess(
+    res,
+    {
+      email: normalizedEmail,
+      expiresAt,
+    },
+    {
+      message: "OTP sent to email",
+    }
+  );
+});
+
+exports.registerUser = asyncHandler(async (req, res) => {
+  const { email, otp } = req.body;
+
+  if (typeof email !== "string" || typeof otp !== "string") {
+    const error = new Error("Email and OTP are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const normalizedEmail = email.toLowerCase().trim();
+  const normalizedOtp = otp.trim();
+
+  if (!normalizedEmail || !normalizedOtp) {
+    const error = new Error("Email and OTP are required");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!isValidEmail(normalizedEmail)) {
+    const error = new Error("Please provide a valid email address");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  if (!/^\d{6}$/.test(normalizedOtp)) {
+    const error = new Error("OTP must be a 6-digit code");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const existingUser = await User.findOne({ email: normalizedEmail });
+  if (existingUser) {
+    const error = new Error("User already exists");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const pendingRegistration = await PendingRegistration.findOne({
+    email: normalizedEmail,
+  });
+
+  if (!pendingRegistration) {
+    const error = new Error("No pending registration found for this email");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (pendingRegistration.expiresAt.getTime() < Date.now()) {
+    await PendingRegistration.deleteOne({ _id: pendingRegistration._id });
+    const error = new Error("OTP has expired. Please request a new one");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const isOtpValid = pendingRegistration.otpHash === hashOtp(normalizedOtp);
+
+  if (!isOtpValid) {
+    pendingRegistration.otpAttempts += 1;
+
+    if (pendingRegistration.otpAttempts >= 5) {
+      await PendingRegistration.deleteOne({ _id: pendingRegistration._id });
+      const error = new Error(
+        "Too many invalid OTP attempts. Please request a new one"
+      );
+      error.statusCode = 400;
+      throw error;
+    }
+
+    await pendingRegistration.save();
+    const error = new Error("Invalid OTP");
+    error.statusCode = 400;
+    throw error;
+  }
 
   const user = await User.create({
-    name: trimmedName,
-    email: normalizedEmail,
-    password: hashedPassword,
+    name: pendingRegistration.name,
+    email: pendingRegistration.email,
+    password: pendingRegistration.password,
   });
+
+  await PendingRegistration.deleteOne({ _id: pendingRegistration._id });
 
   return sendSuccess(res, buildAuthPayload(user), { statusCode: 201 });
 });
 
-// LOGIN
 exports.loginUser = asyncHandler(async (req, res) => {
   const { email, password } = req.body;
 
