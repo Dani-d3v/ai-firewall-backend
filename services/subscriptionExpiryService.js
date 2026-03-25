@@ -1,22 +1,46 @@
 const User = require("../models/user");
 const { markExpiredSubscriptionForUser } = require("../utils/subscriptionState");
+const { removeWireGuardPeer } = require("./gatewaySshService");
 
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 const expireSubscriptions = async () => {
+  const now = new Date();
   const users = await User.find({
-    "subscription.status": "active",
-    "subscription.endDate": { $lt: new Date() },
+    $or: [
+      {
+        "subscription.isActive": true,
+        "subscription.validUntil": { $lt: now },
+      },
+      {
+        "subscription.status": "expired",
+        "vpn.publicKey": { $exists: true, $ne: null },
+        "vpn.status": { $ne: "revoked" },
+      },
+    ],
   });
 
   let expiredCount = 0;
 
   for (const user of users) {
-    const changed = markExpiredSubscriptionForUser(user);
+    try {
+      if (user.vpn?.publicKey) {
+        await removeWireGuardPeer(user.vpn.publicKey);
+        user.vpn.status = "revoked";
+        user.vpn.lastDeprovisionedAt = now;
+      }
 
-    if (changed) {
-      await user.save();
-      expiredCount += 1;
+      const changed = markExpiredSubscriptionForUser(user, now);
+
+      if (changed || user.isModified("vpn")) {
+        await user.save();
+        expiredCount += 1;
+      }
+    } catch (error) {
+      console.error(
+        `Failed to deprovision expired user ${user._id}:`,
+        error.message
+      );
     }
   }
 

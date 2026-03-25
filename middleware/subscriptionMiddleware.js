@@ -25,4 +25,14 @@ const syncSubscriptionStatus = asyncHandler(async (req, res, next) => {
   return next();
 });
 
-module.exports = { syncSubscriptionStatus };
+const requireActiveSubscription = asyncHandler(async (req, res, next) => {
+  if (!req.user?.subscription?.isActive) {
+    const error = new Error("An active subscription is required for this feature");
+    error.statusCode = 403;
+    throw error;
+  }
+
+  return next();
+});
+
+module.exports = { syncSubscriptionStatus, requireActiveSubscription };

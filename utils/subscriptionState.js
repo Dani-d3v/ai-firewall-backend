@@ -1,18 +1,22 @@
 const markExpiredSubscriptionForUser = (user, now = new Date()) => {
   if (
-    user.subscription?.status === "active" &&
-    user.subscription?.endDate &&
-    now > new Date(user.subscription.endDate)
+    user.subscription?.isActive &&
+    user.subscription?.validUntil &&
+    now > new Date(user.subscription.validUntil)
   ) {
     user.subscription.status = "expired";
+    user.subscription.isActive = false;
+    user.subscription.validUntil = user.subscription.validUntil;
 
     const activeHistory = [...(user.subscriptionHistory || [])]
       .reverse()
-      .find((entry) => entry.status === "active");
+      .find((entry) => entry.isActive);
 
     if (activeHistory) {
       activeHistory.status = "expired";
-      activeHistory.endedAt = user.subscription.endDate;
+      activeHistory.isActive = false;
+      activeHistory.endedAt = user.subscription.validUntil;
+      activeHistory.validUntil = user.subscription.validUntil;
     }
 
     return true;

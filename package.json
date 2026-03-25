@@ -23,7 +23,8 @@
     "mongodb": "^7.1.0",
     "mongoose": "^9.3.1",
     "morgan": "^1.10.1",
-    "nodemailer": "^7.0.13"
+    "nodemailer": "^7.0.13",
+    "ssh2": "^1.17.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.14"

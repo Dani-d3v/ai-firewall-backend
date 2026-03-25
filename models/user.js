@@ -44,10 +44,32 @@ const subscriptionHistorySchema = new mongoose.Schema(
     paymentMethod: String,
     paymentStatus: String,
     transactionId: String,
+    validUntil: Date,
+    isActive: {
+      type: Boolean,
+      default: false,
+    },
   },
   {
     _id: true,
     timestamps: true,
+  }
+);
+
+const vpnSchema = new mongoose.Schema(
+  {
+    publicKey: String,
+    assignedIp: String,
+    status: {
+      type: String,
+      enum: ["unassigned", "pending", "active", "revoked"],
+      default: "unassigned",
+    },
+    lastProvisionedAt: Date,
+    lastDeprovisionedAt: Date,
+  },
+  {
+    _id: false,
   }
 );
 
@@ -112,8 +134,17 @@ const userSchema = new mongoose.Schema(
       paymentMethod: String,
       paymentStatus: String,
       transactionId: String,
+      validUntil: Date,
+      isActive: {
+        type: Boolean,
+        default: false,
+      },
     },
     subscriptionHistory: [subscriptionHistorySchema],
+    vpn: {
+      type: vpnSchema,
+      default: () => ({}),
+    },
   },
   {
     timestamps: true,

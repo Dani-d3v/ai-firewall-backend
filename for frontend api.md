@@ -325,7 +325,8 @@ Body:
 ```json
 {
   "planId": "PLAN_ID",
-  "paymentId": "PAYMENT_ID"
+  "paymentId": "PAYMENT_ID",
+  "wireguardPublicKey": "USER_WIREGUARD_PUBKEY"
 }
 ```
 
@@ -376,6 +377,44 @@ Body:
 ```json
 {}
 ```
+
+### 4.7 Get VPN access state
+
+Endpoint:
+
+```http
+GET /api/subscriptions/vpn-access
+```
+
+Headers:
+
+```http
+Authorization: Bearer <token>
+```
+
+Notes:
+
+- Requires an active subscription.
+- Returns the assigned internal VPN IP and WireGuard peer state.
+
+### 4.8 Download WireGuard config template
+
+Endpoint:
+
+```http
+GET /api/subscriptions/download-config
+```
+
+Headers:
+
+```http
+Authorization: Bearer <token>
+```
+
+Notes:
+
+- Requires an active subscription.
+- Response is a `.conf` file template. The client must insert its own private key locally before import.
 
 ## 5. Admin subscription APIs
 
@@ -446,6 +485,51 @@ Authorization: Bearer <admin_token>
 ```
 
 ## 6. Frontend flow summary
+
+## 6.1 Dashboard live alerts
+
+Endpoint:
+
+```http
+GET /api/dashboard/stream
+```
+
+Headers:
+
+```http
+Authorization: Bearer <token>
+```
+
+Notes:
+
+- This is a Server-Sent Events stream.
+- Listen for the `alert` event to show "AI Shield Active" mitigation notices in real time.
+
+## 6.2 Gateway alert webhook
+
+Endpoint:
+
+```http
+POST /api/alerts
+```
+
+Headers:
+
+```http
+Content-Type: application/json
+X-Alert-Secret: <ALERT_WEBHOOK_SECRET>
+```
+
+Body:
+
+```json
+{
+  "victim_vpn_ip": "10.0.0.12",
+  "attacker_ip": "198.51.100.24"
+}
+```
+
+## 7. Frontend flow summary
 
 ### Register flow
 

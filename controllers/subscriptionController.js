@@ -5,8 +5,17 @@ const User = require("../models/user");
 const Payment = require("../models/Payment");
 const asyncHandler = require("../utils/asyncHandler");
 const { sendSuccess } = require("../utils/apiResponse");
-const { normalizePlanInput, escapeRegex } = require("../utils/validation");
+const {
+  normalizePlanInput,
+  escapeRegex,
+  isValidWireGuardPublicKey,
+  normalizeWireGuardPublicKey,
+} = require("../utils/validation");
 const { markExpiredSubscriptionForUser } = require("../utils/subscriptionState");
+const { createPeerProvisioningRequest } = require("../services/gatewaySshService");
+const env = require("../config/env");
+
+const ALLOWED_PLAN_DURATIONS = [30, 180, 365];
 
 const buildError = (message, statusCode) => {
   const error = new Error(message);
@@ -18,7 +27,7 @@ const generateTransactionId = () =>
   `SIM-${Date.now()}-${Math.random().toString(36).slice(2, 10).toUpperCase()}`;
 
 const ensureNoActiveSubscription = (user) => {
-  if (user.subscription?.status === "active") {
+  if (user.subscription?.isActive) {
     throw buildError(
       "You already have an active subscription. Cancel it or wait until it expires before buying another plan.",
       409
@@ -26,13 +35,90 @@ const ensureNoActiveSubscription = (user) => {
   }
 };
 
+const ensureAllowedDuration = (duration) => {
+  if (!ALLOWED_PLAN_DURATIONS.includes(duration)) {
+    throw buildError(
+      "Only the 1 Month, 6 Months, and 12 Months BRADSafe tiers are supported.",
+      400
+    );
+  }
+};
+
+const buildVpnStatus = (user) => ({
+  isActive: Boolean(user.subscription?.isActive),
+  validUntil: user.subscription?.validUntil || null,
+  assignedIp: user.vpn?.assignedIp || null,
+  publicKey: user.vpn?.publicKey || null,
+  status: user.vpn?.status || "unassigned",
+});
+
+const buildConfigText = (user) => {
+  if (!user.vpn?.assignedIp || !user.vpn?.publicKey) {
+    throw buildError("WireGuard peer details are not available for this user yet.", 400);
+  }
+
+  if (!env.GATEWAY_WIREGUARD_PUBLIC_KEY) {
+    throw buildError(
+      "Gateway WireGuard public key is not configured on the backend.",
+      500
+    );
+  }
+
+  const endpoint = `${env.GATEWAY_PUBLIC_IP}:${env.GATEWAY_WIREGUARD_PORT}`;
+
+  return [
+    "[Interface]",
+    "# Add your client private key locally before importing this config.",
+    "PrivateKey = <YOUR_PRIVATE_KEY>",
+    `Address = ${user.vpn.assignedIp}`,
+    `DNS = ${env.WIREGUARD_DNS}`,
+    "",
+    "[Peer]",
+    `PublicKey = ${env.GATEWAY_WIREGUARD_PUBLIC_KEY}`,
+    `Endpoint = ${endpoint}`,
+    `AllowedIPs = ${env.WIREGUARD_ALLOWED_IPS}`,
+    "PersistentKeepalive = 25",
+    "",
+  ].join("\n");
+};
+
+const findNextAvailableVpnIp = async () => {
+  const users = await User.find(
+    { "vpn.assignedIp": { $exists: true, $ne: null } },
+    "vpn.assignedIp"
+  ).lean();
+
+  const assignedHosts = new Set(
+    users
+      .map((user) => user.vpn?.assignedIp)
+      .filter(Boolean)
+      .map((ip) => {
+        const [address] = ip.split("/");
+        const parts = address.split(".");
+        return Number(parts[3]);
+      })
+      .filter(Number.isInteger)
+  );
+
+  for (let host = env.WIREGUARD_START_HOST; host <= env.WIREGUARD_END_HOST; host += 1) {
+    if (!assignedHosts.has(host)) {
+      return `${env.WIREGUARD_NETWORK_PREFIX}.${host}/32`;
+    }
+  }
+
+  throw buildError("No WireGuard IPs are available for provisioning.", 503);
+};
+
 exports.getPlans = asyncHandler(async (req, res) => {
-  const plans = await Subscription.find().sort({ price: 1, duration: 1 });
+  const plans = await Subscription.find({
+    duration: { $in: ALLOWED_PLAN_DURATIONS },
+  }).sort({ duration: 1 });
+
   return sendSuccess(res, plans);
 });
 
 exports.buyPlan = asyncHandler(async (req, res) => {
-  const { planId, paymentId } = req.body;
+  const { planId, paymentId, wireguardPublicKey } = req.body;
 
   if (!mongoose.isValidObjectId(planId)) {
     throw buildError("Invalid plan ID", 400);
@@ -45,6 +131,10 @@ exports.buyPlan = asyncHandler(async (req, res) => {
     );
   }
 
+  if (!isValidWireGuardPublicKey(wireguardPublicKey)) {
+    throw buildError("A valid WireGuard public key is required.", 400);
+  }
+
   const [plan, user] = await Promise.all([
     Subscription.findById(planId),
     User.findById(req.user._id),
@@ -53,6 +143,8 @@ exports.buyPlan = asyncHandler(async (req, res) => {
   if (!plan) {
     throw buildError("Plan not found", 404);
   }
+
+  ensureAllowedDuration(plan.duration);
 
   if (!user) {
     throw buildError("User not found", 404);
@@ -74,8 +166,17 @@ exports.buyPlan = asyncHandler(async (req, res) => {
   }
 
   const startDate = new Date();
-  const endDate = new Date();
-  endDate.setDate(startDate.getDate() + plan.duration);
+  const validUntil = new Date(startDate.getTime());
+  validUntil.setDate(validUntil.getDate() + plan.duration);
+
+  const normalizedPublicKey = normalizeWireGuardPublicKey(wireguardPublicKey);
+  const assignedIp = await findNextAvailableVpnIp();
+
+  await createPeerProvisioningRequest({
+    userId: user._id,
+    publicKey: normalizedPublicKey,
+    assignedIp,
+  });
 
   const historyEntry = {
     planId: plan._id,
@@ -85,11 +186,13 @@ exports.buyPlan = asyncHandler(async (req, res) => {
     features: plan.features,
     status: "active",
     startedAt: startDate,
-    endedAt: endDate,
+    endedAt: validUntil,
     paymentId: payment._id,
     paymentMethod: payment.paymentMethod,
     paymentStatus: payment.status,
     transactionId: payment.transactionId,
+    validUntil,
+    isActive: true,
   };
 
   user.subscription = {
@@ -98,22 +201,38 @@ exports.buyPlan = asyncHandler(async (req, res) => {
     price: plan.price,
     status: "active",
     startDate,
-    endDate,
+    endDate: validUntil,
     cancelledAt: undefined,
     paymentId: payment._id,
     paymentMethod: payment.paymentMethod,
     paymentStatus: payment.status,
     transactionId: payment.transactionId,
+    validUntil,
+    isActive: true,
   };
   user.subscriptionHistory.push(historyEntry);
+  user.vpn = {
+    publicKey: normalizedPublicKey,
+    assignedIp,
+    status: "active",
+    lastProvisionedAt: startDate,
+    lastDeprovisionedAt: undefined,
+  };
 
   payment.status = "used";
 
   await Promise.all([payment.save(), user.save()]);
 
-  return sendSuccess(res, user.subscription, {
-    message: "Subscription activated",
-  });
+  return sendSuccess(
+    res,
+    {
+      subscription: user.subscription,
+      vpn: buildVpnStatus(user),
+    },
+    {
+      message: "Subscription activated and WireGuard peer queued for provisioning",
+    }
+  );
 });
 
 exports.getMyPlan = asyncHandler(async (req, res) =>
@@ -153,6 +272,8 @@ exports.simulatePayment = asyncHandler(async (req, res) => {
     throw buildError("Plan not found", 404);
   }
 
+  ensureAllowedDuration(plan.duration);
+
   if (!user) {
     throw buildError("User not found", 404);
   }
@@ -186,6 +307,7 @@ exports.simulatePayment = asyncHandler(async (req, res) => {
         _id: plan._id,
         name: plan.name,
         price: plan.price,
+        duration: plan.duration,
       },
     },
     {
@@ -204,7 +326,7 @@ exports.cancelMySubscription = asyncHandler(async (req, res) => {
 
   markExpiredSubscriptionForUser(user);
 
-  if (user.subscription?.status !== "active") {
+  if (!user.subscription?.isActive) {
     throw buildError("You do not have an active subscription to cancel", 400);
   }
 
@@ -212,15 +334,24 @@ exports.cancelMySubscription = asyncHandler(async (req, res) => {
   user.subscription.status = "cancelled";
   user.subscription.cancelledAt = cancelledAt;
   user.subscription.endDate = cancelledAt;
+  user.subscription.validUntil = cancelledAt;
+  user.subscription.isActive = false;
 
   const activeHistory = [...user.subscriptionHistory]
     .reverse()
-    .find((entry) => entry.status === "active");
+    .find((entry) => entry.isActive);
 
   if (activeHistory) {
     activeHistory.status = "cancelled";
     activeHistory.cancelledAt = cancelledAt;
     activeHistory.endedAt = cancelledAt;
+    activeHistory.validUntil = cancelledAt;
+    activeHistory.isActive = false;
+  }
+
+  if (user.vpn) {
+    user.vpn.status = "revoked";
+    user.vpn.lastDeprovisionedAt = cancelledAt;
   }
 
   await user.save();
@@ -228,6 +359,22 @@ exports.cancelMySubscription = asyncHandler(async (req, res) => {
   return sendSuccess(res, user.subscription, {
     message: "Subscription cancelled",
   });
+});
+
+exports.getVpnAccess = asyncHandler(async (req, res) =>
+  sendSuccess(res, buildVpnStatus(req.user))
+);
+
+exports.downloadVpnConfig = asyncHandler(async (req, res) => {
+  const configText = buildConfigText(req.user);
+
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="bradsafe-user-${req.user._id}.conf"`
+  );
+
+  res.status(200).send(configText);
 });
 
 exports.createPlan = asyncHandler(async (req, res) => {
@@ -245,6 +392,8 @@ exports.createPlan = asyncHandler(async (req, res) => {
   ) {
     throw buildError("name, price (number), and duration (number) are required", 400);
   }
+
+  ensureAllowedDuration(normalizedDuration);
 
   if (normalizedPrice < 0 || normalizedDuration <= 0) {
     throw buildError(
@@ -295,6 +444,8 @@ exports.updatePlan = asyncHandler(async (req, res) => {
   ) {
     throw buildError("name, price (number), and duration (number) are required", 400);
   }
+
+  ensureAllowedDuration(normalizedDuration);
 
   if (normalizedPrice < 0 || normalizedDuration <= 0) {
     throw buildError(

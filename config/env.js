@@ -23,4 +23,29 @@ module.exports = {
   SMTP_USER: process.env.SMTP_USER,
   SMTP_PASS: process.env.SMTP_PASS,
   EMAIL_FROM: process.env.EMAIL_FROM,
+  GATEWAY_HOST: process.env.GATEWAY_HOST || "34.173.88.58",
+  GATEWAY_PORT: Number.parseInt(process.env.GATEWAY_PORT || "22", 10),
+  GATEWAY_USERNAME: process.env.GATEWAY_USERNAME,
+  GATEWAY_PRIVATE_KEY: process.env.GATEWAY_PRIVATE_KEY,
+  GATEWAY_PRIVATE_KEY_PATH: process.env.GATEWAY_PRIVATE_KEY_PATH,
+  GATEWAY_PUBLIC_IP: process.env.GATEWAY_PUBLIC_IP || process.env.GATEWAY_HOST || "34.173.88.58",
+  GATEWAY_WIREGUARD_PUBLIC_KEY: process.env.GATEWAY_WIREGUARD_PUBLIC_KEY,
+  GATEWAY_WIREGUARD_PORT: Number.parseInt(
+    process.env.GATEWAY_WIREGUARD_PORT || "51820",
+    10
+  ),
+  WIREGUARD_INTERFACE: process.env.WIREGUARD_INTERFACE || "wg0",
+  WIREGUARD_NETWORK_PREFIX: process.env.WIREGUARD_NETWORK_PREFIX || "10.0.0",
+  WIREGUARD_START_HOST: Number.parseInt(
+    process.env.WIREGUARD_START_HOST || "2",
+    10
+  ),
+  WIREGUARD_END_HOST: Number.parseInt(
+    process.env.WIREGUARD_END_HOST || "254",
+    10
+  ),
+  WIREGUARD_DNS: process.env.WIREGUARD_DNS || "1.1.1.1",
+  WIREGUARD_ALLOWED_IPS:
+    process.env.WIREGUARD_ALLOWED_IPS || "0.0.0.0/0, ::/0",
+  ALERT_WEBHOOK_SECRET: process.env.ALERT_WEBHOOK_SECRET,
 };
