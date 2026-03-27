@@ -37,19 +37,30 @@ const ensureAllowedDuration = (duration) => {
   }
 };
 
+/**
+ * Builds a clear VPN access object.
+ * gatewayConfiguration contains the Host Machine (Server) details.
+ * clientConfiguration contains the individual user's assigned settings.
+ */
 const buildVpnStatus = (user) => {
   const endpoint = `${env.GATEWAY_PUBLIC_IP}:${env.GATEWAY_WIREGUARD_PORT}`;
+  
   return {
     isActive: Boolean(user.subscription?.isActive),
     status: user.vpn?.status || "unassigned",
     validUntil: user.subscription?.validUntil || null,
+    
+    // This is what the user puts in their [Interface] section
     clientConfiguration: {
       address: user.vpn?.assignedIp || null,
       dns: env.WIREGUARD_DNS || "1.1.1.1",
       userPublicKey: user.vpn?.publicKey || null,
     },
+
+    // This is what the user puts in their [Peer] section (The HOST MACHINE)
     gatewayConfiguration: {
-      serverPublicKey: env.GATEWAY_WIREGUARD_PUBLIC_KEY,
+      // CRITICAL: This is the Host Machine's Public Key from your .env
+      hostPublicKey: env.GATEWAY_WIREGUARD_PUBLIC_KEY, 
       endpoint: endpoint,
       allowedIps: env.WIREGUARD_ALLOWED_IPS || "0.0.0.0/0",
       persistentKeepalive: 25,
@@ -95,10 +106,28 @@ exports.buyPlan = asyncHandler(async (req, res) => {
   const normalizedPublicKey = normalizeWireGuardPublicKey(wireguardPublicKey);
   const assignedIp = await findNextAvailableVpnIp();
 
+  // Request SSH provisioning on the host machine
   await createPeerProvisioningRequest({ userId: user._id, publicKey: normalizedPublicKey, assignedIp });
 
-  user.subscription = { planId: plan._id, plan: plan.name, price: plan.price, status: "active", startDate, endDate: validUntil, transactionId: payment.transactionId, isActive: true, validUntil };
-  user.vpn = { publicKey: normalizedPublicKey, assignedIp, status: "active", lastProvisionedAt: startDate };
+  user.subscription = { 
+    planId: plan._id, 
+    plan: plan.name, 
+    price: plan.price, 
+    status: "active", 
+    startDate, 
+    endDate: validUntil, 
+    transactionId: payment.transactionId, 
+    isActive: true, 
+    validUntil 
+  };
+  
+  user.vpn = { 
+    publicKey: normalizedPublicKey, 
+    assignedIp, 
+    status: "active", 
+    lastProvisionedAt: startDate 
+  };
+  
   payment.status = "used";
 
   await Promise.all([payment.save(), user.save()]);
@@ -116,7 +145,15 @@ exports.simulatePayment = asyncHandler(async (req, res) => {
   const { planId, paymentMethod } = req.body;
   const plan = await Subscription.findById(planId);
   if (!plan) throw buildError("Plan not found", 404);
-  const payment = await Payment.create({ userId: req.user._id, planId: plan._id, amount: plan.price, paymentMethod: paymentMethod || "telebirr", status: "completed", simulated: true, transactionId: generateTransactionId() });
+  const payment = await Payment.create({ 
+    userId: req.user._id, 
+    planId: plan._id, 
+    amount: plan.price, 
+    paymentMethod: paymentMethod || "telebirr", 
+    status: "completed", 
+    simulated: true, 
+    transactionId: generateTransactionId() 
+  });
   return sendSuccess(res, payment, { statusCode: 201 });
 });
 
@@ -131,6 +168,10 @@ exports.cancelMySubscription = asyncHandler(async (req, res) => {
 exports.getVpnAccess = asyncHandler(async (req, res) => sendSuccess(res, buildVpnStatus(req.user)));
 
 exports.downloadVpnConfig = asyncHandler(async (req, res) => {
+  if (!req.user.vpn || !req.user.vpn.assignedIp) {
+    throw buildError("VPN configuration not found. Please buy a plan first.", 404);
+  }
+  
   const endpoint = `${env.GATEWAY_PUBLIC_IP}:${env.GATEWAY_WIREGUARD_PORT}`;
   const config = [
     "[Interface]",
@@ -144,8 +185,9 @@ exports.downloadVpnConfig = asyncHandler(async (req, res) => {
     `AllowedIPs = ${env.WIREGUARD_ALLOWED_IPS || "0.0.0.0/0"}`,
     "PersistentKeepalive = 25"
   ].join("\n");
+  
   res.setHeader("Content-Type", "text/plain");
-  res.setHeader("Content-Disposition", 'attachment; filename="vpn.conf"');
+  res.setHeader("Content-Disposition", 'attachment; filename="bradsafe_vpn.conf"');
   return res.status(200).send(config);
 });
 
