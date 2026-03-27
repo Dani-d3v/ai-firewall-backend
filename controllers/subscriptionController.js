@@ -38,9 +38,9 @@ const ensureAllowedDuration = (duration) => {
 };
 
 /**
- * Builds a clear VPN access object.
- * gatewayConfiguration contains the Host Machine (Server) details.
- * clientConfiguration contains the individual user's assigned settings.
+ * Builds the VPN response. 
+ * Note: If hostPublicKey is missing, ensure GATEWAY_WIREGUARD_PUBLIC_KEY 
+ * is set in your Leapcell Environment Variables.
  */
 const buildVpnStatus = (user) => {
   const endpoint = `${env.GATEWAY_PUBLIC_IP}:${env.GATEWAY_WIREGUARD_PORT}`;
@@ -50,19 +50,18 @@ const buildVpnStatus = (user) => {
     status: user.vpn?.status || "unassigned",
     validUntil: user.subscription?.validUntil || null,
     
-    // This is what the user puts in their [Interface] section
+    // User's specific tunnel settings
     clientConfiguration: {
       address: user.vpn?.assignedIp || null,
       dns: env.WIREGUARD_DNS || "1.1.1.1",
       userPublicKey: user.vpn?.publicKey || null,
     },
 
-    // This is what the user puts in their [Peer] section (The HOST MACHINE)
+    // The Gateway (Host Machine) details the user needs for the [Peer] section
     gatewayConfiguration: {
-      // CRITICAL: This is the Host Machine's Public Key from your .env
-      hostPublicKey: env.GATEWAY_WIREGUARD_PUBLIC_KEY, 
+      hostPublicKey: env.GATEWAY_WIREGUARD_PUBLIC_KEY || "MISSING_FROM_ENV",
       endpoint: endpoint,
-      allowedIps: env.WIREGUARD_ALLOWED_IPS || "0.0.0.0/0",
+      allowedIps: env.WIREGUARD_ALLOWED_IPS || "0.0.0.0/0, ::/0",
       persistentKeepalive: 25,
     }
   };
@@ -79,7 +78,7 @@ const findNextAvailableVpnIp = async () => {
   throw buildError("No WireGuard IPs available.", 503);
 };
 
-// --- Exported Actions matching your Routes ---
+// --- Exported Actions ---
 
 exports.getPlans = asyncHandler(async (req, res) => {
   const plans = await Subscription.find({ duration: { $in: ALLOWED_PLAN_DURATIONS } }).sort({ duration: 1 });
@@ -106,7 +105,7 @@ exports.buyPlan = asyncHandler(async (req, res) => {
   const normalizedPublicKey = normalizeWireGuardPublicKey(wireguardPublicKey);
   const assignedIp = await findNextAvailableVpnIp();
 
-  // Request SSH provisioning on the host machine
+  // Provisioning via SSH to your Google Cloud VM
   await createPeerProvisioningRequest({ userId: user._id, publicKey: normalizedPublicKey, assignedIp });
 
   user.subscription = { 
@@ -169,7 +168,7 @@ exports.getVpnAccess = asyncHandler(async (req, res) => sendSuccess(res, buildVp
 
 exports.downloadVpnConfig = asyncHandler(async (req, res) => {
   if (!req.user.vpn || !req.user.vpn.assignedIp) {
-    throw buildError("VPN configuration not found. Please buy a plan first.", 404);
+    throw buildError("VPN configuration not found.", 404);
   }
   
   const endpoint = `${env.GATEWAY_PUBLIC_IP}:${env.GATEWAY_WIREGUARD_PORT}`;
@@ -180,14 +179,14 @@ exports.downloadVpnConfig = asyncHandler(async (req, res) => {
     `DNS = ${env.WIREGUARD_DNS || "1.1.1.1"}`,
     "",
     "[Peer]",
-    `PublicKey = ${env.GATEWAY_WIREGUARD_PUBLIC_KEY}`,
+    `PublicKey = ${env.GATEWAY_WIREGUARD_PUBLIC_KEY || "REPLACE_WITH_SERVER_PUBLIC_KEY"}`,
     `Endpoint = ${endpoint}`,
-    `AllowedIPs = ${env.WIREGUARD_ALLOWED_IPS || "0.0.0.0/0"}`,
+    `AllowedIPs = ${env.WIREGUARD_ALLOWED_IPS || "0.0.0.0/0, ::/0"}`,
     "PersistentKeepalive = 25"
   ].join("\n");
   
   res.setHeader("Content-Type", "text/plain");
-  res.setHeader("Content-Disposition", 'attachment; filename="bradsafe_vpn.conf"');
+  res.setHeader("Content-Disposition", 'attachment; filename="vectraflow.conf"');
   return res.status(200).send(config);
 });
 
