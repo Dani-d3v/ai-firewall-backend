@@ -35,6 +35,12 @@ Notes:
 }
 ```
 
+- Subscription access is controlled by `subscription.isActive === true`.
+- The product catalog is limited to three BRADSafe duration tiers:
+  - 1 Month
+  - 6 Months
+  - 12 Months
+
 ## 1. Auth
 
 ### 1.1 Request registration OTP
@@ -237,10 +243,29 @@ Headers:
 Authorization: Bearer <token>
 ```
 
-Body:
+Success response:
 
 ```json
-{}
+{
+  "success": true,
+  "data": {
+    "_id": "USER_ID",
+    "name": "Daniel",
+    "email": "daniel@example.com",
+    "role": "user",
+    "subscription": {
+      "plan": "BRADSafe Autonomous - 1 Month",
+      "status": "active",
+      "validUntil": "2026-04-24T12:00:00.000Z",
+      "isActive": true
+    },
+    "vpn": {
+      "publicKey": "USER_WIREGUARD_PUBKEY",
+      "assignedIp": "10.0.0.12/32",
+      "status": "active"
+    }
+  }
+}
 ```
 
 ## 3. Dashboard
@@ -259,10 +284,65 @@ Headers:
 Authorization: Bearer <token>
 ```
 
-Body:
+Success response:
 
 ```json
-{}
+{
+  "success": true,
+  "data": {
+    "user": {
+      "_id": "USER_ID",
+      "name": "Daniel",
+      "email": "daniel@example.com",
+      "role": "user"
+    },
+    "subscription": {
+      "plan": "BRADSafe Autonomous - 1 Month",
+      "status": "active",
+      "validUntil": "2026-04-24T12:00:00.000Z",
+      "isActive": true
+    },
+    "vpn": {
+      "publicKey": "USER_WIREGUARD_PUBKEY",
+      "assignedIp": "10.0.0.12/32",
+      "status": "active"
+    },
+    "recentAlerts": [],
+    "subscriptionHistoryCount": 1
+  }
+}
+```
+
+### 3.2 Stream live dashboard alerts
+
+Endpoint:
+
+```http
+GET /api/dashboard/stream
+```
+
+Headers:
+
+```http
+Authorization: Bearer <token>
+```
+
+Notes:
+
+- This is a Server-Sent Events stream.
+- The backend sends an initial `connected` event.
+- Listen for the `alert` event to show live AI mitigation notifications.
+
+Example `alert` event payload:
+
+```json
+{
+  "_id": "ALERT_ID",
+  "message": "AI Shield Active: A DDoS attack from 198.51.100.24 was just mitigated for your connection.",
+  "attackerIp": "198.51.100.24",
+  "victimVpnIp": "10.0.0.12/32",
+  "mitigatedAt": "2026-03-25T12:00:00.000Z"
+}
 ```
 
 ## 4. Subscriptions
@@ -279,6 +359,41 @@ Headers:
 
 ```http
 Content-Type: application/json
+```
+
+Notes:
+
+- Returns the three BRADSafe tiers only.
+
+Example response:
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "_id": "PLAN_ID_1M",
+      "name": "BRADSafe Autonomous - 1 Month",
+      "price": 9.99,
+      "duration": 30,
+      "features": ["VPN Access", "Download Config", "AI Shield"]
+    },
+    {
+      "_id": "PLAN_ID_6M",
+      "name": "BRADSafe Autonomous - 6 Months",
+      "price": 49.99,
+      "duration": 180,
+      "features": ["VPN Access", "Download Config", "AI Shield"]
+    },
+    {
+      "_id": "PLAN_ID_12M",
+      "name": "BRADSafe Autonomous - 12 Months",
+      "price": 89.99,
+      "duration": 365,
+      "features": ["VPN Access", "Download Config", "AI Shield"]
+    }
+  ]
+}
 ```
 
 ### 4.2 Simulate payment
@@ -305,6 +420,31 @@ Body:
 }
 ```
 
+Success response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "paymentId": "PAYMENT_ID",
+    "transactionId": "SIM-1234567890-ABCDEFGH",
+    "amount": 9.99,
+    "currency": "USD",
+    "paymentMethod": "telebirr",
+    "status": "completed",
+    "simulated": true,
+    "paidAt": "2026-03-25T12:00:00.000Z",
+    "plan": {
+      "_id": "PLAN_ID",
+      "name": "BRADSafe Autonomous - 1 Month",
+      "price": 9.99,
+      "duration": 30
+    }
+  },
+  "message": "Simulated payment completed"
+}
+```
+
 ### 4.3 Buy plan
 
 Endpoint:
@@ -327,6 +467,40 @@ Body:
   "planId": "PLAN_ID",
   "paymentId": "PAYMENT_ID",
   "wireguardPublicKey": "USER_WIREGUARD_PUBKEY"
+}
+```
+
+Notes:
+
+- `wireguardPublicKey` is required.
+- On success, the backend writes `/etc/wireguard/new_peers/user_{userId}.json` on the Gateway VM over SSH.
+- The frontend should treat this call as the activation point for VPN access.
+
+Success response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "subscription": {
+      "planId": "PLAN_ID",
+      "plan": "BRADSafe Autonomous - 1 Month",
+      "price": 9.99,
+      "status": "active",
+      "startDate": "2026-03-25T12:00:00.000Z",
+      "endDate": "2026-04-24T12:00:00.000Z",
+      "validUntil": "2026-04-24T12:00:00.000Z",
+      "isActive": true
+    },
+    "vpn": {
+      "isActive": true,
+      "validUntil": "2026-04-24T12:00:00.000Z",
+      "assignedIp": "10.0.0.12/32",
+      "publicKey": "USER_WIREGUARD_PUBKEY",
+      "status": "active"
+    }
+  },
+  "message": "Subscription activated and WireGuard peer queued for provisioning"
 }
 ```
 
@@ -378,6 +552,11 @@ Body:
 {}
 ```
 
+Notes:
+
+- This makes the subscription inactive in the backend immediately.
+- The scheduled expiry/deprovision job handles peer removal on the Gateway.
+
 ### 4.7 Get VPN access state
 
 Endpoint:
@@ -395,7 +574,22 @@ Authorization: Bearer <token>
 Notes:
 
 - Requires an active subscription.
-- Returns the assigned internal VPN IP and WireGuard peer state.
+- Use this endpoint to decide whether "VPN Access" UI should be enabled.
+
+Success response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "isActive": true,
+    "validUntil": "2026-04-24T12:00:00.000Z",
+    "assignedIp": "10.0.0.12/32",
+    "publicKey": "USER_WIREGUARD_PUBKEY",
+    "status": "active"
+  }
+}
+```
 
 ### 4.8 Download WireGuard config template
 
@@ -414,7 +608,25 @@ Authorization: Bearer <token>
 Notes:
 
 - Requires an active subscription.
-- Response is a `.conf` file template. The client must insert its own private key locally before import.
+- Use this endpoint to decide whether "Download Config" UI should be enabled.
+- Response content type is `text/plain`.
+- Response is a `.conf` template and still includes `PrivateKey = <YOUR_PRIVATE_KEY>`.
+
+Example response body:
+
+```ini
+[Interface]
+# Add your client private key locally before importing this config.
+PrivateKey = <YOUR_PRIVATE_KEY>
+Address = 10.0.0.12/32
+DNS = 1.1.1.1
+
+[Peer]
+PublicKey = GATEWAY_WIREGUARD_PUBLIC_KEY
+Endpoint = 34.173.88.58:51820
+AllowedIPs = 0.0.0.0/0, ::/0
+PersistentKeepalive = 25
+```
 
 ## 5. Admin subscription APIs
 
@@ -437,12 +649,16 @@ Body:
 
 ```json
 {
-  "name": "Pro",
-  "price": 29.99,
+  "name": "BRADSafe Autonomous - 1 Month",
+  "price": 9.99,
   "duration": 30,
-  "features": ["Feature 1", "Feature 2"]
+  "features": ["VPN Access", "Download Config", "AI Shield"]
 }
 ```
+
+Notes:
+
+- Only `duration` values `30`, `180`, and `365` are accepted.
 
 ### 5.2 Update plan
 
@@ -463,10 +679,10 @@ Body:
 
 ```json
 {
-  "name": "Pro Plus",
-  "price": 39.99,
-  "duration": 30,
-  "features": ["Feature 1", "Feature 2", "Feature 3"]
+  "name": "BRADSafe Autonomous - 6 Months",
+  "price": 49.99,
+  "duration": 180,
+  "features": ["VPN Access", "Download Config", "AI Shield"]
 }
 ```
 
@@ -484,28 +700,9 @@ Headers:
 Authorization: Bearer <admin_token>
 ```
 
-## 6. Frontend flow summary
+## 6. Gateway webhook
 
-## 6.1 Dashboard live alerts
-
-Endpoint:
-
-```http
-GET /api/dashboard/stream
-```
-
-Headers:
-
-```http
-Authorization: Bearer <token>
-```
-
-Notes:
-
-- This is a Server-Sent Events stream.
-- Listen for the `alert` event to show "AI Shield Active" mitigation notices in real time.
-
-## 6.2 Gateway alert webhook
+### 6.1 Receive mitigation alert
 
 Endpoint:
 
@@ -529,27 +726,54 @@ Body:
 }
 ```
 
+Notes:
+
+- `victim_vpn_ip` may be sent as `10.0.0.12` or `10.0.0.12/32`.
+- The backend maps the IP to a user and pushes a live dashboard notification.
+
+Success response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "alertId": "ALERT_ID",
+    "userId": "USER_ID"
+  },
+  "message": "Alert received"
+}
+```
+
 ## 7. Frontend flow summary
 
 ### Register flow
 
-1. Call `POST /api/auth/register/request-otp`
-2. Ask user for the 6-digit OTP from email
-3. Call `POST /api/auth/register`
-4. Save returned `token`
-5. Save returned `tokenExpiresAt`
+1. Call `POST /api/auth/register/request-otp`.
+2. Ask the user for the 6-digit OTP from email.
+3. Call `POST /api/auth/register`.
+4. Save the returned `token`.
+5. Save the returned `tokenExpiresAt`.
 
 ### Login flow
 
-1. Call `POST /api/auth/login`
-2. Save returned `token`
-3. Save returned `tokenExpiresAt`
+1. Call `POST /api/auth/login`.
+2. Save the returned `token`.
+3. Save the returned `tokenExpiresAt`.
 
-### Forgot password flow
+### Purchase and provisioning flow
 
-1. Call `POST /api/auth/forgot-password`
-2. Ask user for the 6-digit OTP from email
-3. Call `POST /api/auth/reset-password`
+1. Call `GET /api/subscriptions` and show only the three BRADSafe tiers.
+2. Generate a WireGuard keypair on the client.
+3. Call `POST /api/subscriptions/simulate-payment`.
+4. Call `POST /api/subscriptions/buy` with `planId`, `paymentId`, and `wireguardPublicKey`.
+5. After success, enable "VPN Access" and "Download Config" because `subscription.isActive` is now `true`.
+6. Call `GET /api/subscriptions/download-config` and replace `PrivateKey = <YOUR_PRIVATE_KEY>` locally before importing into WireGuard.
+
+### Live protection flow
+
+1. Open an SSE connection to `GET /api/dashboard/stream` after login.
+2. Listen for `alert` events.
+3. Show the returned `message` in the user dashboard when mitigation happens.
 
 ### Protected requests
 

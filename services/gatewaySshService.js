@@ -5,8 +5,10 @@ const env = require("../config/env");
 const PEER_DROP_DIR = "/etc/wireguard/new_peers";
 
 const getPrivateKey = () => {
-  if (env.GATEWAY_PRIVATE_KEY?.trim()) {
-    return env.GATEWAY_PRIVATE_KEY.replace(/\\n/g, "\n");
+  const privateKeyText = process.env.GATEWAY_PRIVATE_KEY?.replace(/\\n/g, "\n");
+
+  if (privateKeyText?.trim()) {
+    return privateKeyText;
   }
 
   if (env.GATEWAY_PRIVATE_KEY_PATH?.trim()) {
@@ -63,9 +65,9 @@ const runRemoteCommand = (command) =>
       })
       .on("error", reject)
       .connect({
-        host: env.GATEWAY_HOST,
-        port: env.GATEWAY_PORT,
-        username: env.GATEWAY_USERNAME,
+        host: process.env.GATEWAY_HOST,
+        port: 22,
+        username: process.env.GATEWAY_USER,
         privateKey: getPrivateKey(),
         readyTimeout: 15000,
       });
