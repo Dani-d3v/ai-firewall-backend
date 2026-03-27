@@ -221,6 +221,7 @@ Success response:
 {
   "success": true,
   "data": {
+    "_id": "USER_ID",
     "email": "daniel@example.com"
   },
   "message": "Password reset successful"
@@ -254,16 +255,24 @@ Success response:
     "email": "daniel@example.com",
     "role": "user",
     "subscription": {
+      "planId": "PLAN_ID",
       "plan": "BRADSafe Autonomous - 1 Month",
+      "price": 9.99,
       "status": "active",
+      "startDate": "2026-03-25T12:00:00.000Z",
+      "endDate": "2026-04-24T12:00:00.000Z",
+      "transactionId": "SIM-1234567890-ABCDEFGH",
       "validUntil": "2026-04-24T12:00:00.000Z",
       "isActive": true
     },
     "vpn": {
       "publicKey": "USER_WIREGUARD_PUBKEY",
       "assignedIp": "10.0.0.12/32",
-      "status": "active"
-    }
+      "status": "active",
+      "lastProvisionedAt": "2026-03-25T12:00:00.000Z"
+    },
+    "createdAt": "2026-03-24T10:00:00.000Z",
+    "updatedAt": "2026-03-25T12:00:00.000Z"
   }
 }
 ```
@@ -297,18 +306,24 @@ Success response:
       "role": "user"
     },
     "subscription": {
+      "planId": "PLAN_ID",
       "plan": "BRADSafe Autonomous - 1 Month",
+      "price": 9.99,
       "status": "active",
+      "startDate": "2026-03-25T12:00:00.000Z",
+      "endDate": "2026-04-24T12:00:00.000Z",
+      "transactionId": "SIM-1234567890-ABCDEFGH",
       "validUntil": "2026-04-24T12:00:00.000Z",
       "isActive": true
     },
     "vpn": {
       "publicKey": "USER_WIREGUARD_PUBKEY",
       "assignedIp": "10.0.0.12/32",
-      "status": "active"
+      "status": "active",
+      "lastProvisionedAt": "2026-03-25T12:00:00.000Z"
     },
     "recentAlerts": [],
-    "subscriptionHistoryCount": 1
+    "subscriptionHistoryCount": 0
   }
 }
 ```
@@ -426,7 +441,9 @@ Success response:
 {
   "success": true,
   "data": {
-    "paymentId": "PAYMENT_ID",
+    "_id": "PAYMENT_ID",
+    "userId": "USER_ID",
+    "planId": "PLAN_ID",
     "transactionId": "SIM-1234567890-ABCDEFGH",
     "amount": 9.99,
     "currency": "USD",
@@ -434,14 +451,9 @@ Success response:
     "status": "completed",
     "simulated": true,
     "paidAt": "2026-03-25T12:00:00.000Z",
-    "plan": {
-      "_id": "PLAN_ID",
-      "name": "BRADSafe Autonomous - 1 Month",
-      "price": 9.99,
-      "duration": 30
-    }
-  },
-  "message": "Simulated payment completed"
+    "createdAt": "2026-03-25T12:00:00.000Z",
+    "updatedAt": "2026-03-25T12:00:00.000Z"
+  }
 }
 ```
 
@@ -489,18 +501,27 @@ Success response:
       "status": "active",
       "startDate": "2026-03-25T12:00:00.000Z",
       "endDate": "2026-04-24T12:00:00.000Z",
+      "transactionId": "SIM-1234567890-ABCDEFGH",
       "validUntil": "2026-04-24T12:00:00.000Z",
       "isActive": true
     },
     "vpn": {
       "isActive": true,
+      "status": "active",
       "validUntil": "2026-04-24T12:00:00.000Z",
-      "assignedIp": "10.0.0.12/32",
-      "publicKey": "USER_WIREGUARD_PUBKEY",
-      "status": "active"
+      "clientConfiguration": {
+        "address": "10.0.0.12/32",
+        "dns": "1.1.1.1",
+        "userPublicKey": "USER_WIREGUARD_PUBKEY"
+      },
+      "gatewayConfiguration": {
+        "hostPublicKey": "GATEWAY_WIREGUARD_PUBLIC_KEY",
+        "endpoint": "34.173.88.58:51820",
+        "allowedIps": "0.0.0.0/0, ::/0",
+        "persistentKeepalive": 25
+      }
     }
-  },
-  "message": "Subscription activated and WireGuard peer queued for provisioning"
+  }
 }
 ```
 
@@ -518,6 +539,25 @@ Headers:
 Authorization: Bearer <token>
 ```
 
+Success response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "planId": "PLAN_ID",
+    "plan": "BRADSafe Autonomous - 1 Month",
+    "price": 9.99,
+    "status": "active",
+    "startDate": "2026-03-25T12:00:00.000Z",
+    "endDate": "2026-04-24T12:00:00.000Z",
+    "transactionId": "SIM-1234567890-ABCDEFGH",
+    "validUntil": "2026-04-24T12:00:00.000Z",
+    "isActive": true
+  }
+}
+```
+
 ### 4.5 Get subscription history
 
 Endpoint:
@@ -530,6 +570,20 @@ Headers:
 
 ```http
 Authorization: Bearer <token>
+```
+
+Notes:
+
+- Returns `subscriptionHistory` in reverse chronological order.
+- At the moment, the backend exposes this array but does not append new history entries during purchase or cancellation, so it may be empty.
+
+Success response:
+
+```json
+{
+  "success": true,
+  "data": []
+}
 ```
 
 ### 4.6 Cancel current subscription
@@ -555,7 +609,18 @@ Body:
 Notes:
 
 - This makes the subscription inactive in the backend immediately.
-- The scheduled expiry/deprovision job handles peer removal on the Gateway.
+- The current controller also sets `vpn.status` to `revoked`.
+
+Success response:
+
+```json
+{
+  "success": true,
+  "data": {
+    "message": "Subscription cancelled"
+  }
+}
+```
 
 ### 4.7 Get VPN access state
 
@@ -583,10 +648,19 @@ Success response:
   "success": true,
   "data": {
     "isActive": true,
+    "status": "active",
     "validUntil": "2026-04-24T12:00:00.000Z",
-    "assignedIp": "10.0.0.12/32",
-    "publicKey": "USER_WIREGUARD_PUBKEY",
-    "status": "active"
+    "clientConfiguration": {
+      "address": "10.0.0.12/32",
+      "dns": "1.1.1.1",
+      "userPublicKey": "USER_WIREGUARD_PUBKEY"
+    },
+    "gatewayConfiguration": {
+      "hostPublicKey": "GATEWAY_WIREGUARD_PUBLIC_KEY",
+      "endpoint": "34.173.88.58:51820",
+      "allowedIps": "0.0.0.0/0, ::/0",
+      "persistentKeepalive": 25
+    }
   }
 }
 ```
@@ -611,12 +685,12 @@ Notes:
 - Use this endpoint to decide whether "Download Config" UI should be enabled.
 - Response content type is `text/plain`.
 - Response is a `.conf` template and still includes `PrivateKey = <YOUR_PRIVATE_KEY>`.
+- Response header includes `Content-Disposition: attachment; filename="vectraflow.conf"`.
 
 Example response body:
 
 ```ini
 [Interface]
-# Add your client private key locally before importing this config.
 PrivateKey = <YOUR_PRIVATE_KEY>
 Address = 10.0.0.12/32
 DNS = 1.1.1.1
@@ -766,8 +840,9 @@ Success response:
 2. Generate a WireGuard keypair on the client.
 3. Call `POST /api/subscriptions/simulate-payment`.
 4. Call `POST /api/subscriptions/buy` with `planId`, `paymentId`, and `wireguardPublicKey`.
-5. After success, enable "VPN Access" and "Download Config" because `subscription.isActive` is now `true`.
-6. Call `GET /api/subscriptions/download-config` and replace `PrivateKey = <YOUR_PRIVATE_KEY>` locally before importing into WireGuard.
+5. Read the returned `vpn.clientConfiguration` and `vpn.gatewayConfiguration` object for the user-specific tunnel settings and gateway peer details.
+6. After success, enable "VPN Access" and "Download Config" because `subscription.isActive` is now `true`.
+7. Call `GET /api/subscriptions/download-config` and replace `PrivateKey = <YOUR_PRIVATE_KEY>` locally before importing into WireGuard.
 
 ### Live protection flow
 
