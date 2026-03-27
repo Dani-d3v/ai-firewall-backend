@@ -2,7 +2,8 @@ const fs = require("fs");
 const { Client } = require("ssh2");
 const env = require("../config/env");
 
-const PEER_DROP_DIR = "/etc/wireguard/new_peers";
+// Update this line at the top of your gatewaySshService.js
+const PEER_DROP_DIR = "/home/abrahamasrat44/new_peers";
 const WG_INTERFACE = "wg0"; // Matches your Gateway setup
 
 /**
@@ -100,7 +101,7 @@ const createPeerProvisioningRequest = async ({ userId, publicKey, assignedIp }) 
 
   // REMOVED 'mkdir -p /etc/wireguard' because it triggers permission errors.
   // We only 'cat' the file now since the directory is already created.
-  const command = `cat <<'EOF' > ${remotePath}\n${payload}\nEOF`;
+ const command = `cat <<'EOF' > ${remotePath}\n${payload}\nEOF`;
 
   console.log(`📡 Sending provisioning request for User ${userId} to Gateway...`);
   await runRemoteCommand(command);
