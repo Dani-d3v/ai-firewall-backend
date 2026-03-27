@@ -10,31 +10,30 @@ const WG_INTERFACE = "wg0"; // Matches your Gateway setup
  * Handles Base64, flattened strings, and file paths.
  */
 const getPrivateKey = () => {
-  const rawKey = (env.GATEWAY_PRIVATE_KEY || "").trim();
+  let rawKey = (env.GATEWAY_PRIVATE_KEY || "").trim();
 
   if (!rawKey) {
-    throw new Error("GATEWAY_PRIVATE_KEY is missing in Leapcell Env.");
+    throw new Error("GATEWAY_PRIVATE_KEY is missing in Environment variables.");
   }
 
-  // If it's the Base64 version, decode it
-  let decoded = rawKey;
-  if (!rawKey.startsWith("-----")) {
-    decoded = Buffer.from(rawKey, "base64").toString("utf-8").trim();
-  }
+  // 1. Clean up common copy-paste errors
+  // This removes literal "\n" strings, actual newlines, and extra spaces
+  let cleanBody = rawKey
+    .replace(/\\n/g, "")           // Removes literal "\n"
+    .replace(/\n/g, "")             // Removes actual newlines
+    .replace(/\s/g, "")             // Removes all spaces
+    .replace("-----BEGINOPENSSHPRIVATEKEY-----", "")
+    .replace("-----ENDOPENSSHPRIVATEKEY-----", "");
 
-  // REMOVE all spaces and random characters, then REBUILD the lines
-  // This fixes the "Magic Bytes" issue by stripping corruption
-  const cleanBody = decoded
-    .replace("-----BEGIN OPENSSH PRIVATE KEY-----", "")
-    .replace("-----END OPENSSH PRIVATE KEY-----", "")
-    .replace(/\s/g, ""); // Remove all spaces/newlines
-
-  // Re-construct with perfect SSH formatting
-  return [
+  // 2. Reconstruct the key with the exact format ssh2 requires
+  // The header and footer MUST be on their own lines
+  const formattedKey = [
     "-----BEGIN OPENSSH PRIVATE KEY-----",
     cleanBody,
     "-----END OPENSSH PRIVATE KEY-----"
   ].join("\n");
+
+  return formattedKey;
 };
 
 /**
