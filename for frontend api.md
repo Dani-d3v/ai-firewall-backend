@@ -3,7 +3,7 @@
 Base URL:
 
 ```text
-http://localhost:5000
+https://ai-firewall-backend-dani-d3v8671-ooua5n91.leapcell.dev
 ```
 
 Common headers:
