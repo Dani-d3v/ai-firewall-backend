@@ -95,10 +95,12 @@ const createPeerProvisioningRequest = async ({ userId, publicKey, assignedIp }) 
     assigned_ip: assignedIp,
   });
 
+  // Target the specific file inside the folder you already gave permissions to
   const remotePath = `${PEER_DROP_DIR}/user_${userId}.json`;
 
-  // Ensures directory exists and writes the file atomically using a heredoc (cat <<'EOF')
-  const command = `mkdir -p ${PEER_DROP_DIR} && cat <<'EOF' > ${remotePath}\n${payload}\nEOF`;
+  // REMOVED 'mkdir -p /etc/wireguard' because it triggers permission errors.
+  // We only 'cat' the file now since the directory is already created.
+  const command = `cat <<'EOF' > ${remotePath}\n${payload}\nEOF`;
 
   console.log(`📡 Sending provisioning request for User ${userId} to Gateway...`);
   await runRemoteCommand(command);
