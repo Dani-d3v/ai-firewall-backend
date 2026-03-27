@@ -3,51 +3,68 @@ const { Client } = require("ssh2");
 const env = require("../config/env");
 
 const PEER_DROP_DIR = "/etc/wireguard/new_peers";
-const PRIVATE_KEY_HEADER = "-----BEGIN";
+const WG_INTERFACE = "wg0"; // Matches your Gateway setup
 
+/**
+ * Decodes and formats the Private Key for the ssh2 library.
+ * Handles Base64, flattened strings, and file paths.
+ */
 const getPrivateKey = () => {
-  const privateKeyText = env.GATEWAY_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
+  let key = (env.GATEWAY_PRIVATE_KEY || "").trim();
 
-  if (privateKeyText?.startsWith(PRIVATE_KEY_HEADER)) {
-    return privateKeyText;
-  }
-
-  const encodedKey = env.GATEWAY_PRIVATE_KEY?.trim();
-
-  if (encodedKey) {
-    const decodedKey = Buffer.from(encodedKey, "base64").toString("utf8").trim();
-
-    if (decodedKey.startsWith(PRIVATE_KEY_HEADER)) {
-      return decodedKey;
+  // 1. Fallback to file path if string isn't provided
+  if (!key && env.GATEWAY_PRIVATE_KEY_PATH) {
+    try {
+      return fs.readFileSync(env.GATEWAY_PRIVATE_KEY_PATH, "utf8");
+    } catch (err) {
+      console.error("❌ Failed to read SSH key from path:", err.message);
     }
   }
 
-  if (privateKeyText?.trim()) {
-    return privateKeyText;
+  if (!key) {
+    throw new Error("Gateway SSH key is not configured in environment variables.");
   }
 
-  if (env.GATEWAY_PRIVATE_KEY_PATH?.trim()) {
-    return fs.readFileSync(env.GATEWAY_PRIVATE_KEY_PATH, "utf8");
+  // 2. If it's Base64 (doesn't start with '---'), decode it
+  if (!key.startsWith("-----")) {
+    console.log("ℹ️ SSH Key detected as Base64. Decoding...");
+    key = Buffer.from(key, "base64").toString("utf8").trim();
   }
 
-  throw new Error(
-    "Gateway SSH key is not configured. Set GATEWAY_PRIVATE_KEY or GATEWAY_PRIVATE_KEY_PATH."
-  );
+  // 3. Repair Step: Ensure actual newlines exist (Cloud platforms often strip them)
+  // ssh2 MUST have \n after the header and before the footer.
+  if (!key.includes("\n")) {
+    console.log("ℹ️ Repairing flattened SSH key format...");
+    key = key
+      .replace("-----BEGIN OPENSSH PRIVATE KEY-----", "-----BEGIN OPENSSH PRIVATE KEY-----\n")
+      .replace("-----END OPENSSH PRIVATE KEY-----", "\n-----END OPENSSH PRIVATE KEY-----");
+  }
+
+  return key;
 };
 
-const escapeForSingleQuotes = (value) => String(value).replace(/'/g, "'\\''");
-
+/**
+ * Executes a command on the Remote Gateway VM via SSH
+ */
 const runRemoteCommand = (command) =>
   new Promise((resolve, reject) => {
     const client = new Client();
+    
+    // Use the variable names exactly as defined in your env config
+    const connectionConfig = {
+      host: env.GATEWAY_HOST,
+      port: parseInt(env.GATEWAY_PORT) || 22,
+      username: env.GATEWAY_USERNAME || "abrahamasrat44",
+      privateKey: getPrivateKey(),
+      readyTimeout: 20000,
+    };
 
     client
       .on("ready", () => {
         client.exec(command, (error, stream) => {
           if (error) {
             client.end();
-            reject(error);
-            return;
+            return reject(error);
           }
 
           let stdout = "";
@@ -56,18 +73,11 @@ const runRemoteCommand = (command) =>
           stream
             .on("close", (code) => {
               client.end();
-
               if (code === 0) {
                 resolve({ stdout, stderr });
-                return;
+              } else {
+                reject(new Error(stderr.trim() || `Remote command failed (code ${code})`));
               }
-
-              reject(
-                new Error(
-                  stderr.trim() ||
-                    `Remote command failed with exit code ${code}`
-                )
-              );
             })
             .on("data", (data) => {
               stdout += data.toString();
@@ -78,16 +88,16 @@ const runRemoteCommand = (command) =>
           });
         });
       })
-      .on("error", reject)
-      .connect({
-        host: env.GATEWAY_HOST,
-        port: env.GATEWAY_PORT,
-        username: env.GATEWAY_USERNAME,
-        privateKey: getPrivateKey(),
-        readyTimeout: 15000,
-      });
+      .on("error", (err) => {
+        console.error("❌ SSH Connection Error:", err.message);
+        reject(err);
+      })
+      .connect(connectionConfig);
   });
 
+/**
+ * Provisions a new WireGuard peer by writing a JSON file to the Gateway
+ */
 const createPeerProvisioningRequest = async ({ userId, publicKey, assignedIp }) => {
   const payload = JSON.stringify({
     public_key: publicKey,
@@ -96,18 +106,25 @@ const createPeerProvisioningRequest = async ({ userId, publicKey, assignedIp }) 
 
   const remotePath = `${PEER_DROP_DIR}/user_${userId}.json`;
 
-  await runRemoteCommand(
-    `mkdir -p ${PEER_DROP_DIR} && cat <<'EOF' > ${remotePath}\n${payload}\nEOF`
-  );
+  // Ensures directory exists and writes the file atomically using a heredoc (cat <<'EOF')
+  const command = `mkdir -p ${PEER_DROP_DIR} && cat <<'EOF' > ${remotePath}\n${payload}\nEOF`;
 
+  console.log(`📡 Sending provisioning request for User ${userId} to Gateway...`);
+  await runRemoteCommand(command);
+  
   return remotePath;
 };
 
+/**
+ * Removes a WireGuard peer from the live interface
+ */
 const removeWireGuardPeer = async (publicKey) => {
-  const escapedKey = escapeForSingleQuotes(publicKey);
-  return runRemoteCommand(
-    `sudo wg set ${env.WIREGUARD_INTERFACE} peer '${escapedKey}' remove`
-  );
+  // Escaping the key to prevent command injection
+  const escapedKey = String(publicKey).replace(/'/g, "'\\''");
+  const command = `sudo wg set ${WG_INTERFACE} peer '${escapedKey}' remove`;
+  
+  console.log(`🗑️ Removing expired peer from Gateway: ${publicKey}`);
+  return runRemoteCommand(command);
 };
 
 module.exports = {
