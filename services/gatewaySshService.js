@@ -10,37 +10,31 @@ const WG_INTERFACE = "wg0"; // Matches your Gateway setup
  * Handles Base64, flattened strings, and file paths.
  */
 const getPrivateKey = () => {
-  let key = (env.GATEWAY_PRIVATE_KEY || "").trim();
+  const rawKey = (env.GATEWAY_PRIVATE_KEY || "").trim();
 
-  // 1. Fallback to file path if string isn't provided
-  if (!key && env.GATEWAY_PRIVATE_KEY_PATH) {
-    try {
-      return fs.readFileSync(env.GATEWAY_PRIVATE_KEY_PATH, "utf8");
-    } catch (err) {
-      console.error("❌ Failed to read SSH key from path:", err.message);
-    }
+  if (!rawKey) {
+    throw new Error("GATEWAY_PRIVATE_KEY is missing in Leapcell Env.");
   }
 
-  if (!key) {
-    throw new Error("Gateway SSH key is not configured in environment variables.");
+  // If it's the Base64 version, decode it
+  let decoded = rawKey;
+  if (!rawKey.startsWith("-----")) {
+    decoded = Buffer.from(rawKey, "base64").toString("utf-8").trim();
   }
 
-  // 2. If it's Base64 (doesn't start with '---'), decode it
-  if (!key.startsWith("-----")) {
-    console.log("ℹ️ SSH Key detected as Base64. Decoding...");
-    key = Buffer.from(key, "base64").toString("utf8").trim();
-  }
+  // REMOVE all spaces and random characters, then REBUILD the lines
+  // This fixes the "Magic Bytes" issue by stripping corruption
+  const cleanBody = decoded
+    .replace("-----BEGIN OPENSSH PRIVATE KEY-----", "")
+    .replace("-----END OPENSSH PRIVATE KEY-----", "")
+    .replace(/\s/g, ""); // Remove all spaces/newlines
 
-  // 3. Repair Step: Ensure actual newlines exist (Cloud platforms often strip them)
-  // ssh2 MUST have \n after the header and before the footer.
-  if (!key.includes("\n")) {
-    console.log("ℹ️ Repairing flattened SSH key format...");
-    key = key
-      .replace("-----BEGIN OPENSSH PRIVATE KEY-----", "-----BEGIN OPENSSH PRIVATE KEY-----\n")
-      .replace("-----END OPENSSH PRIVATE KEY-----", "\n-----END OPENSSH PRIVATE KEY-----");
-  }
-
-  return key;
+  // Re-construct with perfect SSH formatting
+  return [
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+    cleanBody,
+    "-----END OPENSSH PRIVATE KEY-----"
+  ].join("\n");
 };
 
 /**
