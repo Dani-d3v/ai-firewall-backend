@@ -10,30 +10,28 @@ const WG_INTERFACE = "wg0"; // Matches your Gateway setup
  * Handles Base64, flattened strings, and file paths.
  */
 const getPrivateKey = () => {
-  let rawKey = (env.GATEWAY_PRIVATE_KEY || "").trim();
+  const envKey = (env.GATEWAY_PRIVATE_KEY || "").trim();
 
-  if (!rawKey) {
-    throw new Error("GATEWAY_PRIVATE_KEY is missing in Environment variables.");
+  if (!envKey) {
+    throw new Error("GATEWAY_PRIVATE_KEY is missing in Leapcell Env.");
   }
 
-  // 1. Clean up common copy-paste errors
-  // This removes literal "\n" strings, actual newlines, and extra spaces
-  let cleanBody = rawKey
-    .replace(/\\n/g, "")           // Removes literal "\n"
-    .replace(/\n/g, "")             // Removes actual newlines
-    .replace(/\s/g, "")             // Removes all spaces
-    .replace("-----BEGINOPENSSHPRIVATEKEY-----", "")
-    .replace("-----ENDOPENSSHPRIVATEKEY-----", "");
-
-  // 2. Reconstruct the key with the exact format ssh2 requires
-  // The header and footer MUST be on their own lines
-  const formattedKey = [
-    "-----BEGIN OPENSSH PRIVATE KEY-----",
-    cleanBody,
-    "-----END OPENSSH PRIVATE KEY-----"
-  ].join("\n");
-
-  return formattedKey;
+  // FORCE DECODE: Treat the env variable as a Base64 blob
+  // This ignores all formatting issues and restores the original file
+  try {
+    const decoded = Buffer.from(envKey, "base64").toString("utf-8");
+    
+    // Safety check: Does it look like a key now?
+    if (decoded.includes("BEGIN OPENSSH PRIVATE KEY")) {
+      return decoded;
+    }
+    
+    // Fallback: If it's already plain text, return it
+    return envKey;
+  } catch (err) {
+    console.error("❌ Key decoding failed:", err.message);
+    return envKey;
+  }
 };
 
 /**
