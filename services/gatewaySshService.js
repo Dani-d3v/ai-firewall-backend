@@ -3,9 +3,24 @@ const { Client } = require("ssh2");
 const env = require("../config/env");
 
 const PEER_DROP_DIR = "/etc/wireguard/new_peers";
+const PRIVATE_KEY_HEADER = "-----BEGIN";
 
 const getPrivateKey = () => {
-  const privateKeyText = process.env.GATEWAY_PRIVATE_KEY?.replace(/\\n/g, "\n");
+  const privateKeyText = env.GATEWAY_PRIVATE_KEY?.replace(/\\n/g, "\n").trim();
+
+  if (privateKeyText?.startsWith(PRIVATE_KEY_HEADER)) {
+    return privateKeyText;
+  }
+
+  const encodedKey = env.GATEWAY_PRIVATE_KEY?.trim();
+
+  if (encodedKey) {
+    const decodedKey = Buffer.from(encodedKey, "base64").toString("utf8").trim();
+
+    if (decodedKey.startsWith(PRIVATE_KEY_HEADER)) {
+      return decodedKey;
+    }
+  }
 
   if (privateKeyText?.trim()) {
     return privateKeyText;
@@ -65,9 +80,9 @@ const runRemoteCommand = (command) =>
       })
       .on("error", reject)
       .connect({
-        host: process.env.GATEWAY_HOST,
-        port: 22,
-        username: process.env.GATEWAY_USER,
+        host: env.GATEWAY_HOST,
+        port: env.GATEWAY_PORT,
+        username: env.GATEWAY_USERNAME,
         privateKey: getPrivateKey(),
         readyTimeout: 15000,
       });
